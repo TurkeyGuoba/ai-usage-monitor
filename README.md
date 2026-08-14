@@ -1,83 +1,87 @@
-# AI Usage Monitor
+# AI Usage Monitor · AI 用量监测
 
-**Local, read-only usage & cost monitoring for AI coding agents — with a Hermes desktop plugin.**
+**本地、只读的 AI 智能体用量与费用监测工具,自带 Hermes 桌面端插件。**
 
-Track cache-hit rate, token consumption, spend, and per-API-provider breakdowns
-(DeepSeek, SiliconFlow, Anthropic, OpenAI, ...) across your AI agents, entirely
-offline. Nothing leaves your machine: the server reads each agent's local
-history files and serves JSON to UI plugins.
+实时查看 **缓存命中率、Token 消耗、花费金额、各 API 提供商性能统计**——全程离线,数据不出本机:
+服务读取各智能体的本地历史记录,输出 JSON 给界面插件。
 
-![MIT](https://img.shields.io/badge/license-MIT-green) ![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue) ![Platform: Windows/macOS/Linux](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey)
+![MIT](https://img.shields.io/badge/license-MIT-green) ![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue) ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey) ![Release](https://img.shields.io/github/v/release/TurkeyGuoba/ai-usage-monitor)
 
-## Features
+[English](README.en.md) | **简体中文**
 
-- **Cache-hit rate** — per provider, per model, per day (cache_read / (input + cache_read))
-- **Token consumption** — totals, daily breakdown, per model, per provider
-- **Cost** — recomputed from a **local, editable price table** (`prices.json`),
-  not the agent's built-in estimate, so it matches the vendor console
-  (e.g. SiliconFlow pricing verified against their website)
-- **Multi-currency** — USD or CNY (¥). Auto-follows the Hermes UI language
-  (Chinese → CNY) with a manual ¥/$ toggle in the pane
-- **Per-API-provider breakdown** — cost, tokens, cache-hit and call counts
-  grouped by billing provider (`deepseek`, `siliconflow`, `anthropic`, `openai`, ...)
-- **Recent sessions** — title + relative time so you can tell which conversation
-  burned the tokens at a glance
-- **Multi-agent** — Hermes Agent out of the box; Claude Code and Codex CLI
-  adapters included (JSONL parsers)
-- **Zero dependencies** — pure Python stdlib (`sqlite3` + `http.server`)
-- **Read-only & local** — binds `127.0.0.1` only, opens the state DB in
-  read-only mode, never writes anything
+## 📸 界面预览
 
-## Architecture
+![模型监测面板](assets/screenshot.png)
+
+> 右侧「模型监测」面板:顶部实时显示当前会话,中部按 API 提供商统计,底部总统计。
+
+## ✨ 功能特性
+
+- **🎯 当前会话实时监测**(第一眼可见)
+  - 正在使用的模型所消耗的 **Token**
+  - **缓存命中率**(实时)
+  - **本会话费用**
+  - **上下文耗尽进度条**(≥85% 自动高亮提醒)
+- **🪙 多货币显示** — 美元 / 人民币(¥)。自动跟随 Hermes 界面语言(简体中文 → ¥),面板内可手动 ¥/$ 切换
+- **💰 费用按官网价重算** — 基于本地可编辑的价格表 `prices.json`(单位:美元/百万 Token),与厂商控制台一致(硅基流动价格已实测核对),不再依赖智能体内置估算
+- **🏢 按 API 提供商统计** — deepseek / siliconflow / anthropic / openai 等:输入、输出、缓存命中率、费用、调用次数一目了然
+- **💬 最近会话** — 显示**会话标题 + 相对时间**(now / 5m / 2h / 1d),一眼认出是哪次对话
+- **🔘 插件内一键开关** — 在 Hermes 面板内直接开启/关闭监测,服务常驻待命、开关即时生效,**永不出现"关了就开不回来"**
+- **🤖 多智能体支持** — Hermes Agent(开箱即用)+ Claude Code + Codex CLI(JSONL 解析适配器)
+- **🛡️ 自愈保活** — watchdog 每 1 分钟探测,服务意外退出自动拉起(健康时完全静默)
+- **🪟 零黑框** — 全部用 `pythonw` + `CREATE_NO_WINDOW` 无窗口运行;开机自启走启动文件夹快捷方式,**不需要管理员权限**
+
+## 🏗️ 架构
 
 ```
 ┌─────────────────────┐        HTTP/JSON (CORS *)        ┌──────────────────────┐
-│  stats_server.py    │ ◄──────────────────────────────► │  Hermes desktop       │
-│  (127.0.0.1:9543)   │          /api/stats              │  plugin (right pane)  │
-│                     │          /api/live               │  ─ or any UI you like │
-│  ┌───────────────┐  │          /api/config             └──────────────────────┘
-│  │ HermesAdapter │──┤  reads  ~/.hermes/state.db (SQLite)
-│  │ ClaudeAdapter │──┤  reads  ~/.claude/projects/**/*.jsonl
-│  │ CodexAdapter  │──┤  reads  ~/.codex/sessions/**/*.jsonl
+│  stats_server.py    │ ◄──────────────────────────────► │  Hermes 桌面插件      │
+│  (127.0.0.1:9543)   │          /api/stats              │  (右侧「模型监测」面板) │
+│                     │          /api/live               └──────────────────────┘
+│  ┌───────────────┐  │          /api/config
+│  │ HermesAdapter │──┤  读取  ~/.hermes/state.db (SQLite)
+│  │ ClaudeAdapter │──┤  读取  ~/.claude/projects/**/*.jsonl
+│  │ CodexAdapter  │──┤  读取  ~/.codex/sessions/**/*.jsonl
 │  └───────────────┘  │
 └─────────────────────┘
-        prices.json (USD per 1M tokens, editable)
-        config.json  (usd_cny rate, currency_auto)
+        prices.json (价格表, 可编辑)
+        config.json  (汇率 / 开关)
 ```
 
-The desktop plugin runs from `file://` inside Electron (origin `null`), so the
-server sends `Access-Control-Allow-Origin: *` for every response. Since it only
-binds to 127.0.0.1 and serves read-only aggregate data, this is safe for a
-local-only tool. If you expose it beyond loopback, put an auth proxy in front.
+- **纯 Python 标准库**,零第三方依赖(`sqlite3` + `http.server`)
+- **只读 & 本地**:仅绑定 `127.0.0.1`,数据库以只读模式打开,绝不写入任何数据
+- 桌面插件运行于 Electron 的 `file://` 环境(origin 为 `null`),因此服务对所有响应返回 `Access-Control-Allow-Origin: *`。服务只监听回环地址且只输出只读聚合数据,本地工具场景下安全;若对外暴露请加认证代理
 
-## Quick start
+## 🚀 快速开始(Windows)
 
-### 1. Start the server
+### 1. 启动数据服务
 
 ```bash
 python stats_server.py --port 9543
 # → AI Usage Monitor listening on http://127.0.0.1:9543
 ```
 
-Requirements: Python 3.8+ (no third-party packages).
+要求:Python 3.8+(无需任何第三方包)。Windows 用户可直接双击 `start-server.bat`(无窗口)。
 
-On Windows you can also double-click `start-server.bat`.
-
-### 2. Install the Hermes desktop plugin
+### 2. 安装 Hermes 桌面插件
 
 ```bash
-# <hermes home> is ~/.hermes (Linux/macOS) or %LOCALAPPDATA%\hermes (Windows)
+# <hermes home> 在 Windows 为 %LOCALAPPDATA%\hermes,Linux/macOS 为 ~/.hermes
 mkdir -p "$HERMES_HOME/desktop-plugins/usage-monitor"
 cp plugin/usage-monitor/plugin.js "$HERMES_HOME/desktop-plugins/usage-monitor/"
 ```
 
-Then in the Hermes desktop app: **⌘K → Reload desktop plugins**.
-A new right-side pane **"Model Monitor"** appears, refreshing every 15 s.
+然后在 Hermes 桌面端:按 **⌘K → Reload desktop plugins(重新加载桌面插件)**。
+右侧会出现「模型监测」面板,每 15 秒自动刷新。
 
-> The plugin fetches `http://127.0.0.1:9543`; if the server is down the pane
-> shows a hint instead of failing silently.
+> 插件请求 `http://127.0.0.1:9543`;服务未运行时面板会给出友好提示,服务恢复后 15 秒内自动恢复。
 
-### 3. Check the API
+### 3. 开机自启(可选)
+
+运行一次 `install-autostart.bat`,注册登录时静默启动(启动文件夹快捷方式,无管理员需求)。
+取消自启:`Win+R` → 输入 `shell:startup` → 删除 `AIUsageMonitor.lnk`。
+
+### 4. 检查 API
 
 ```bash
 curl http://127.0.0.1:9543/health
@@ -86,11 +90,9 @@ curl "http://127.0.0.1:9543/api/live?limit=8"
 curl http://127.0.0.1:9543/api/config
 ```
 
-## Pricing & currency
+## 💵 价格与货币
 
-Costs are **recomputed locally** from `prices.json` — unit prices in **USD per
-1M tokens**, keyed by provider, with model-prefix matching (longest prefix
-wins). Example (matches the SiliconFlow console as of 2026-08):
+费用在本地按 `prices.json` **重新计算**——单价单位为**美元 / 百万 Token**,按提供商分类、模型前缀最长匹配。示例(与硅基流动控制台 2026-08 一致):
 
 ```json
 "siliconflow": {
@@ -98,35 +100,29 @@ wins). Example (matches the SiliconFlow console as of 2026-08):
 }
 ```
 
-- Edit `prices.json` freely; restart the server to reload.
-- Unknown (provider, model) pairs fall back to the agent's own cost estimate
-  (Hermes `estimated_cost_usd`) and are marked by the absence of a price entry.
-- Currency: `config.json` → `usd_cny` (default 7.2) is the USD→CNY rate.
-  `currency_auto: true` makes the plugin follow the Hermes UI language
-  (Chinese → ¥). The ¥/$ toggle in the pane overrides it for the session.
+- 随时编辑 `prices.json`,重启服务生效
+- 未匹配到价格的 (provider, model) 组合回退用智能体自身的估算(`estimated_cost_usd`)
+- 货币:`config.json` 的 `usd_cny`(默认 7.2)为美元→人民币汇率;`currency_auto: true` 时插件跟随 Hermes 界面语言(中文 → ¥),面板内 ¥/$ 按钮可手动覆盖
 
-## Supported agents
+## 🤖 支持的智能体
 
-| Agent | Data source | Status |
-|-------|-------------|--------|
-| Hermes Agent | `~/.hermes/state.db` (sessions + session_model_usage) | ✅ production-tested |
-| Claude Code | `~/.claude/projects/**/*.jsonl` (assistant `usage` fields) | ✅ parser included |
-| Codex CLI | `~/.codex/sessions/**/*.jsonl` (recursive `usage` scan) | ✅ parser included |
+| 智能体 | 数据源 | 状态 |
+|--------|--------|------|
+| Hermes Agent | `~/.hermes/state.db`(sessions + session_model_usage) | ✅ 生产环境实测 |
+| Claude Code | `~/.claude/projects/**/*.jsonl`(assistant 消息 `usage` 字段) | ✅ 解析器已内置 |
+| Codex CLI | `~/.codex/sessions/**/*.jsonl`(递归扫描 `usage`) | ✅ 解析器已内置 |
 
-Claude Code / Codex rows are aggregated into the same totals, provider
-breakdown (`anthropic` / `openai`) and recent-session list. Note the server
-auto-detects the Hermes home: `$HERMES_HOME`, else `~/.hermes`, else
-`%LOCALAPPDATA%\hermes` on Windows. Override with `--home`.
+Claude Code / Codex 的行会并入同一套总量、提供商统计(`anthropic` / `openai`)与最近会话列表。服务自动探测 Hermes home:`$HERMES_HOME` → `~/.hermes` → Windows 下 `%LOCALAPPDATA%\hermes`;也可用 `--home` 指定。
 
-### Testing the adapters
+### 测试适配器
 
 ```bash
-python tests/mock_adapters.py   # builds fake JSONL histories and asserts parsing
+python tests/mock_adapters.py   # 构造模拟 JSONL 历史并断言解析结果
 ```
 
-## API reference
+## 📡 API 参考
 
-### `GET /api/stats?days=30` (1–365)
+### `GET /api/stats?days=30`(1–365)
 
 ```json
 {
@@ -145,20 +141,28 @@ python tests/mock_adapters.py   # builds fake JSONL histories and asserts parsin
 
 ### `GET /api/live?limit=8`
 
-Recent sessions with `title`, `reltime` ("now", "5m", "3h", "2d", "08-01"),
-`model`, `provider`, token counts, `cache_hit_pct`, `estimated_cost`.
+最近会话:`title`、`reltime`("now"、"5m"、"3h"、"2d"、"08-01")、`model`、`provider`、Token 数、`cache_hit_pct`、`estimated_cost`。
 
 ### `GET /api/config`
 
-`{ prices, usd_cny, currency_auto }` — lets the UI render the price table and
-convert currency without hardcoding.
+`{ prices, usd_cny, currency_auto, monitor_enabled }` — 界面据此渲染价格表、换算货币,并同步开关状态。
 
-## Contributing
+### `POST /api/control`
 
-New agent adapters are ~40 lines: collect a list of rows
+`{"enabled": true|false}` — 插件一键开关。关闭时数据接口返回 503(面板显示「已关闭」),进程保持存活,开关永远可达。
+
+## 🔧 缓存命中率优化建议
+
+- **保持会话连续**:前缀缓存按字节精确匹配,长会话命中率自然高(实测 deepseek 长会话 99%+)
+- **避免中途切换模型/提供商**:切换会开新会话,缓存从零积累
+- **降低上下文压缩频率**:Hermes 配置 `compression.threshold` 适当调高(如 0.75),减少压缩重建前缀
+
+## 🤝 贡献
+
+新增智能体适配器约 40 行:收集一行行数据
 `{model, provider, input_tokens, output_tokens, cache_read_tokens, api_calls, started_at, title}`,
-then register it in `collect_stats()`. PRs welcome.
+然后在 `collect_stats()` 中注册。欢迎 PR!
 
-## License
+## 📄 许可
 
-MIT — do whatever you want, attribution appreciated.
+MIT — 随意使用,注明出处即可。
