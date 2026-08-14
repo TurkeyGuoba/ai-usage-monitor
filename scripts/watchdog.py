@@ -41,15 +41,9 @@ def healthy(timeout=3):
 def main():
     if healthy():
         return  # silent tick
-    # Honour the plugin on/off switch (config.json monitor_enabled).
-    config_path = os.path.join(os.path.dirname(os.path.abspath(STATS_SERVER)), "config.json")
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        if not cfg.get("monitor_enabled", True):
-            return  # monitoring turned off in the plugin — stay down
-    except Exception:
-        pass  # config unreadable → default to relaunch
+    # The on/off switch lives at the API layer (monitor_enabled in config.json).
+    # The watchdog ONLY keeps the process alive, so the toggle is always
+    # reachable — even if the process crashed while disabled.
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     try:

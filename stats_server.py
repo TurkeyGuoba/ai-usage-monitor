@@ -488,12 +488,10 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(raw.decode("utf-8") or "{}")
                 enabled = bool(body.get("enabled"))
                 set_monitor_enabled(enabled)
+                # The process STAYS ALIVE (watchdog keeps it up); the switch
+                # only gates the data endpoints. This keeps the toggle always
+                # reachable — no "server is down so I can't turn it back on".
                 self._send({"ok": True, "monitor_enabled": enabled})
-                if not enabled:
-                    # Graceful self-shutdown after the response is flushed.
-                    import threading
-
-                    threading.Timer(0.6, lambda: self.server.shutdown()).start()
                 return
             self._send({"ok": False, "error": "not found"}, 404)
         except Exception as exc:  # noqa: BLE001
@@ -517,10 +515,14 @@ class Handler(BaseHTTPRequestHandler):
                     "monitor_enabled": CONFIG.get("monitor_enabled", True),
                 })
             if parsed.path == "/api/stats":
+                if not CONFIG.get("monitor_enabled", True):
+                    return self._send({"ok": False, "disabled": True, "monitor_enabled": False}, 503)
                 days = int(qs.get("days", ["30"])[0])
                 days = max(1, min(days, 365))
                 return self._send(collect_stats(days, self.server.hermes_home))
             if parsed.path == "/api/live":
+                if not CONFIG.get("monitor_enabled", True):
+                    return self._send({"ok": False, "disabled": True, "monitor_enabled": False}, 503)
                 limit = int(qs.get("limit", ["8"])[0])
                 return self._send(collect_live(self.server.hermes_home, limit))
             self._send({"ok": False, "error": "not found"}, 404)

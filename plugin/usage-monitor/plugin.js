@@ -381,6 +381,7 @@ function UsagePane() {
       return true
     }
   })
+  const [serverEnabled, setServerEnabled] = useState(null) // authoritative from /api/config
 
   /* Detect Hermes language once */
   useEffect(() => {
@@ -431,17 +432,33 @@ function UsagePane() {
   }
 
   const load = useCallback(async () => {
+    // /api/config is always served (even when monitoring is disabled) and is
+    // the authoritative on/off source — fetch it separately so the toggle
+    // can sync even while stats/live return 503.
     try {
-      const [s, l, cfg] = await Promise.all([
+      const cfg = await fetchJson('/api/config')
+      if (cfg && cfg.usd_cny) setUsdCny(cfg.usd_cny)
+      if (cfg && typeof cfg.monitor_enabled === 'boolean') {
+        setServerEnabled(cfg.monitor_enabled)
+        setWant(cfg.monitor_enabled)
+        try {
+          if (pluginCtx) pluginCtx.storage.set('monitorEnabled', cfg.monitor_enabled)
+        } catch (e) {}
+      }
+    } catch (e) {
+      /* server fully unreachable — the err banner will show */
+    }
+    try {
+      const [s, l] = await Promise.all([
         fetchJson('/api/stats?days=' + days),
-        fetchJson('/api/live?limit=6'),
-        fetchJson('/api/config')
+        fetchJson('/api/live?limit=6')
       ])
       setStats(s)
       setLive(l)
-      if (cfg && cfg.usd_cny) setUsdCny(cfg.usd_cny)
       setErr(null)
     } catch (e) {
+      setStats(null)
+      setLive(null)
       setErr(String(e && e.message ? e.message : e))
     }
   }, [days])
