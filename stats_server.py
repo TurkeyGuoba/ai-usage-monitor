@@ -181,7 +181,7 @@ def hermes_collect(home, days, cutoff):
     if not os.path.isfile(db_path):
         return []
     uri = "file:{}?mode=ro".format(urllib.parse.quote(db_path.replace("\\", "/")))
-    conn = sqlite3.connect(uri, uri=True, timeout=5)
+    conn = sqlite3.connect(uri, uri=True, timeout=20)
     conn.row_factory = sqlite3.Row
     rows = []
     try:
@@ -419,6 +419,12 @@ def collect_stats(days, hermes_home):
     by_provider = [p for p in by_provider if _has_usage(p)]
     by_agent = [a for a in by_agent if _has_usage(a)]
 
+    # Placeholder provider names (NULL billing_provider -> "unknown", model
+    # auto-fallback -> "auto") can't be fixed at the source — hide them so the
+    # per-provider breakdown only shows real APIs. Totals still include them.
+    _PLACEHOLDER_PROVIDERS = {"unknown", "auto"}
+    by_provider = [p for p in by_provider if p.get("provider") not in _PLACEHOLDER_PROVIDERS]
+
     return {
         "ok": True,
         "days": days,
@@ -436,7 +442,7 @@ def collect_live(hermes_home, limit=8):
     db_path = _hermes_db_path(hermes_home)
     if os.path.isfile(db_path):
         uri = "file:{}?mode=ro".format(urllib.parse.quote(db_path.replace("\\", "/")))
-        conn = sqlite3.connect(uri, uri=True, timeout=5)
+        conn = sqlite3.connect(uri, uri=True, timeout=20)
         conn.row_factory = sqlite3.Row
         try:
             for r in conn.execute(
@@ -553,7 +559,15 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def log_message(self, fmt, *args):
-        pass
+        # Request log — only when STATS_REQ_LOG=1 is set (diagnostics).
+        try:
+            import os
+            if os.environ.get("STATS_REQ_LOG"):
+                _p = os.path.join(os.environ.get("TEMP", "/tmp"), "stats_server_req.log")
+                with open(_p, "a", encoding="utf-8") as _f:
+                    _f.write("%s %s\n" % (self.address_string(), fmt % args))
+        except Exception:
+            pass
 
 
 class Server(ThreadingHTTPServer):

@@ -22,6 +22,7 @@ import { useEffect, useState, useCallback } from 'react'
 
 const STATS_URL = 'http://127.0.0.1:9543'
 const POLL_MS = 15000
+const FETCH_TIMEOUT_MS = 8000
 
 let pluginCtx = null // set in register(); used for ctx.storage
 
@@ -135,9 +136,18 @@ function fmtPct(n) {
 }
 
 async function fetchJson(path, opts) {
-  const res = await fetch(STATS_URL + path, Object.assign({ cache: 'no-store' }, opts))
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(
+      STATS_URL + path,
+      Object.assign({ cache: 'no-store' }, opts, { signal: ctrl.signal })
+    )
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    return res.json()
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,7 +275,10 @@ function CurrentSession({ current, liveRow, t, currency, rate }) {
 }
 
 function ProviderTable({ providers, t, currency, rate }) {
-  if (!providers || providers.length === 0) {
+  // Defensive: hide placeholder provider names the server may still emit
+  // (older stats_server versions surface NULL billing_provider as "unknown").
+  const visible = (providers || []).filter((p) => p && !['unknown', 'auto'].includes(p.provider))
+  if (!visible || visible.length === 0) {
     return jsx('div', {
       className: 'py-3 text-center text-xs text-(--ui-text-tertiary)',
       children: t.noData
@@ -283,7 +296,7 @@ function ProviderTable({ providers, t, currency, rate }) {
       jsx('div', { className: 'flex-1 text-right', children: t.calls })
     ]
   })
-  const rows = providers.map((p) =>
+  const rows = visible.map((p) =>
     jsxs(
       'div',
       {
@@ -600,7 +613,11 @@ function UsagePane() {
               'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-2 text-xs text-(--ui-text-secondary)',
             children: [
               jsx('div', { className: 'font-medium', children: t.serverDown }),
-              jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)', children: t.serverHint })
+              jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)', children: t.serverHint }),
+              jsx('div', {
+                className: 'mt-0.5 font-mono text-[0.625rem] break-all text-(--ui-text-quaternary)',
+                children: String(err).slice(0, 160)
+              })
             ]
           })
         : !want
