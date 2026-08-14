@@ -1,0 +1,5 @@
+{
+  "_comment": "Local config for AI Usage Monitor. usd_cny = USD->CNY rate used when the UI shows CNY (edit freely). currency_auto = true follows the app language (Chinese -> CNY, otherwise USD)",
+  "usd_cny": 7.2,
+  "currency_auto": true
+}

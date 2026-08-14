@@ -1,0 +1,22 @@
+{
+  "_comment": "Prices in USD per 1M tokens. Key = API provider (as recorded in usage data), value = {model prefix: {input, output, cache_read}}. Longest matching model prefix wins. Edit freely — the server reloads prices on restart. Sources: SiliconFlow console (2026-08-14), DeepSeek/Anthropic/OpenAI public pricing.",
+  "siliconflow": {
+    "deepseek-ai/DeepSeek-V4-Flash-0731": {"input": 0.14, "output": 0.28, "cache_read": 0.028},
+    "deepseek-ai/DeepSeek-V4-Flash": {"input": 0.14, "output": 0.28, "cache_read": 0.028}
+  },
+  "deepseek": {
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28, "cache_read": 0.014},
+    "deepseek-chat": {"input": 0.14, "output": 0.28, "cache_read": 0.014},
+    "deepseek-reasoner": {"input": 0.28, "output": 0.56, "cache_read": 0.028}
+  },
+  "anthropic": {
+    "claude-sonnet-4.6": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
+    "claude-sonnet-4.5": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
+    "claude-opus-4.6": {"input": 5.0, "output": 25.0, "cache_read": 0.50},
+    "claude-haiku-3.5": {"input": 0.80, "output": 4.0, "cache_read": 0.08}
+  },
+  "openai": {
+    "gpt-5": {"input": 1.25, "output": 10.0, "cache_read": 0.125},
+    "gpt-4o": {"input": 2.50, "output": 10.0, "cache_read": 0.125}
+  }
+}
