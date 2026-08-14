@@ -23,6 +23,8 @@ import { useEffect, useState, useCallback } from 'react'
 const STATS_URL = 'http://127.0.0.1:9543'
 const POLL_MS = 15000
 
+let pluginCtx = null // set in register(); used for ctx.storage
+
 /* ------------------------------------------------------------------ */
 /* i18n                                                                */
 /* ------------------------------------------------------------------ */
@@ -62,6 +64,10 @@ const STR = {
     contextUsed: '上下文占用',
     notStarted: '未开始',
     ctxTitle: '上下文耗尽',
+    on: '监测中',
+    off: '已关闭',
+    starting: '启动中…',
+    turnedOff: '监测已关闭(点击开关重新开启)',
   },
   en: {
     paneTitle: 'Model Monitor',
@@ -97,6 +103,10 @@ const STR = {
     contextUsed: 'Context Used',
     notStarted: 'not started',
     ctxTitle: 'Context Exhaustion',
+    on: 'on',
+    off: 'off',
+    starting: 'starting…',
+    turnedOff: 'Monitoring off (click the switch to re-enable)',
   },
 }
 
@@ -124,8 +134,8 @@ function fmtPct(n) {
   return (n == null ? 0 : n).toFixed(1) + '%'
 }
 
-async function fetchJson(path) {
-  const res = await fetch(STATS_URL + path, { cache: 'no-store' })
+async function fetchJson(path, opts) {
+  const res = await fetch(STATS_URL + path, Object.assign({ cache: 'no-store' }, opts))
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.json()
 }
@@ -364,6 +374,13 @@ function UsagePane() {
   const [err, setErr] = useState(null)
   const [usdCny, setUsdCny] = useState(7.2)
   const [currency, setCurrency] = useState(null) // null = follow language
+  const [want, setWant] = useState(() => {
+    try {
+      return pluginCtx ? pluginCtx.storage.get('monitorEnabled') !== false : true
+    } catch (e) {
+      return true
+    }
+  })
 
   /* Detect Hermes language once */
   useEffect(() => {
@@ -390,6 +407,28 @@ function UsagePane() {
 
   const t = STR[lang] || STR.en
   const effCurrency = currency || (lang === 'zh' ? 'CNY' : 'USD')
+  const running = !err
+
+  const toggleMonitor = async () => {
+    const next = !want
+    setWant(next)
+    try {
+      if (pluginCtx) pluginCtx.storage.set('monitorEnabled', next)
+    } catch (e) {}
+    try {
+      await fetchJson('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next })
+      })
+    } catch (e) {
+      // server down: watchdog will bring it back (or keep it down) — fine
+    }
+    if (next) {
+      // Ask for data immediately; watchdog (≤1 min) fills the gap if down.
+      load()
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -483,7 +522,44 @@ function UsagePane() {
       jsxs('div', {
         className: 'flex items-center justify-between gap-1',
         children: [
-          jsx('div', { className: 'font-medium', children: t.paneTitle }),
+          jsxs('div', {
+            className: 'flex items-center gap-1.5',
+            children: [
+              jsx('div', { className: 'font-medium', children: t.paneTitle }),
+              jsx(
+                'button',
+                {
+                  type: 'button',
+                  onClick: toggleMonitor,
+                  title: want ? t.on : t.off,
+                  className: cn(
+                    'flex items-center gap-1 rounded-full border px-1.5 py-px text-[0.625rem] transition-colors',
+                    !want
+                      ? 'border-(--ui-stroke-secondary) text-(--ui-text-tertiary)'
+                      : running
+                        ? 'border-(--ui-accent)/50 text-(--ui-accent)'
+                        : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary)'
+                  ),
+                  children: [
+                    jsx('span', {
+                      className: cn(
+                        'h-1.5 w-1.5 rounded-full',
+                        !want
+                          ? 'bg-(--ui-text-quaternary)'
+                          : running
+                            ? 'bg-(--ui-accent)'
+                            : 'bg-(--ui-text-tertiary)'
+                      )
+                    }),
+                    jsx('span', {
+                      children: !want ? t.off : running ? t.on : t.starting
+                    })
+                  ]
+                },
+                'monitor-switch'
+              )
+            ]
+          }),
           jsxs('div', {
             className: 'flex items-center gap-1',
             children: [
@@ -500,8 +576,8 @@ function UsagePane() {
         ]
       }),
 
-      /* server-down banner */
-      err
+      /* server-down banner (hidden when the user turned monitoring off) */
+      err && want
         ? jsxs('div', {
             className:
               'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-2 text-xs text-(--ui-text-secondary)',
@@ -510,7 +586,13 @@ function UsagePane() {
               jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)', children: t.serverHint })
             ]
           })
-        : null,
+        : !want
+          ? jsx('div', {
+              className:
+                'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-2 text-xs text-(--ui-text-tertiary)',
+              children: t.turnedOff
+            })
+          : null,
 
       /* ── CURRENT SESSION (first thing you see) ── */
       sectionTitle(t.currentTitle),
@@ -568,6 +650,7 @@ export default {
   id: 'usage-monitor', // must match the folder name
   name: 'Model Monitor',
   register(ctx) {
+    pluginCtx = ctx
     ctx.register({
       id: 'usage-monitor-pane',
       area: 'panes',

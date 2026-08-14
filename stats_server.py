@@ -76,14 +76,15 @@ DEFAULT_PRICES = {
 }
 
 DEFAULT_CONFIG = {
-    "_comment": "Local config. usd_cny is the USD->CNY rate used when currency=CNY; edit freely.",
+    "_comment": "Local config. usd_cny is the USD->CNY rate used when currency=CNY; edit freely. monitor_enabled is the plugin on/off switch (watchdog honours it).",
     "usd_cny": 7.2,
-    "currency_auto": True,  # True: follow app language (zh -> CNY, else USD)
+    "currency_auto": True,
+    "monitor_enabled": True,
 }
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "*",
     "Access-Control-Max-Age": "600",
 }
@@ -97,8 +98,23 @@ def load_json(path, default):
         return default
 
 
+def save_json(path, obj):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 PRICES = load_json(PRICES_PATH, DEFAULT_PRICES)
 CONFIG = load_json(CONFIG_PATH, DEFAULT_CONFIG)
+CONFIG_LOCK = __import__("threading").Lock()
+
+
+def set_monitor_enabled(enabled):
+    with CONFIG_LOCK:
+        CONFIG["monitor_enabled"] = bool(enabled)
+        save_json(CONFIG_PATH, CONFIG)
 
 
 def price_for(provider, model):
@@ -463,6 +479,29 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
 
+    def do_POST(self):
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/api/control":
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                raw = self.rfile.read(length) if length else b"{}"
+                body = json.loads(raw.decode("utf-8") or "{}")
+                enabled = bool(body.get("enabled"))
+                set_monitor_enabled(enabled)
+                self._send({"ok": True, "monitor_enabled": enabled})
+                if not enabled:
+                    # Graceful self-shutdown after the response is flushed.
+                    import threading
+
+                    threading.Timer(0.6, lambda: self.server.shutdown()).start()
+                return
+            self._send({"ok": False, "error": "not found"}, 404)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self._send({"ok": False, "error": str(exc)}, 500)
+            except Exception:
+                pass
+
     def do_GET(self):
         try:
             parsed = urllib.parse.urlparse(self.path)
@@ -475,6 +514,7 @@ class Handler(BaseHTTPRequestHandler):
                     "prices": {p: {m: pr for m, pr in t.items()} for p, t in PRICES.items() if not p.startswith("_")},
                     "usd_cny": CONFIG.get("usd_cny", 7.2),
                     "currency_auto": CONFIG.get("currency_auto", True),
+                    "monitor_enabled": CONFIG.get("monitor_enabled", True),
                 })
             if parsed.path == "/api/stats":
                 days = int(qs.get("days", ["30"])[0])
