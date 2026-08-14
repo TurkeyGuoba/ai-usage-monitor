@@ -199,7 +199,10 @@ def hermes_collect(home, days, cutoff):
             (cutoff,),
         ):
             rows.append(dict(r))
-        # aux calls from session_model_usage (never touch sessions counters)
+        # aux calls from session_model_usage — ONLY task rows (task != '').
+        # The task='' row duplicates the main-loop counters already in
+        # `sessions`; summing it would double-count (verified 2026-08-14:
+        # siliconflow main-loop numbers appeared identically in both tables).
         for r in conn.execute(
             """
             SELECT model, COALESCE(NULLIF(billing_provider,''),'unknown') AS provider,
@@ -208,7 +211,7 @@ def hermes_collect(home, days, cutoff):
                    COALESCE(estimated_cost_usd,0) AS est_cost,
                    last_seen AS started_at, '' AS title, '' AS id
             FROM session_model_usage
-            WHERE last_seen > ?
+            WHERE last_seen > ? AND task != ''
             """,
             (cutoff,),
         ):
