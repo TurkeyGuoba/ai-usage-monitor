@@ -1,13 +1,14 @@
 /**
  * AI Usage Monitor — Hermes desktop plugin
  * ----------------------------------------
- * Right-side pane showing token usage, cache-hit rate, cost (USD/CNY) and
- * per-API-provider breakdown for Hermes Agent (and Claude Code / Codex
- * when the stats server picks them up).
+ * Top: live stats for the CURRENT session (tokens, cache hit, cost,
+ *      context exhaustion).
+ * Middle: per-API-provider breakdown + recent sessions.
+ * Bottom: overall totals (unchanged content).
  *
  * Data comes from the local stats server:
  *   python stats_server.py --port 9543
- * (see README.md in the repo root.)
+ * Current-session live usage comes from the gateway `session.usage` RPC.
  *
  * Install: <hermes home>/desktop-plugins/usage-monitor/plugin.js
  * Then: ⌘K → Reload desktop plugins
@@ -29,12 +30,14 @@ const POLL_MS = 15000
 const STR = {
   zh: {
     paneTitle: '模型监测',
+    currentTitle: '当前会话',
     totalTokens: '总 Token',
     cacheHit: '缓存命中率',
     cost: '总费用(预估)',
     sessions: '会话数',
     byProvider: '按 API 提供商',
     recent: '最近会话',
+    totalsTitle: '总统计',
     serverDown: '监测服务未运行',
     serverHint: '启动: python stats_server.py (端口 9543)',
     noData: '暂无数据',
@@ -54,15 +57,22 @@ const STR = {
     provider: '提供商',
     model: '模型',
     est: '预估',
+    sessionTokens: '本会话 Token',
+    sessionCost: '本会话费用',
+    contextUsed: '上下文占用',
+    notStarted: '未开始',
+    ctxTitle: '上下文耗尽',
   },
   en: {
     paneTitle: 'Model Monitor',
+    currentTitle: 'Current Session',
     totalTokens: 'Total Tokens',
     cacheHit: 'Cache Hit',
     cost: 'Total Cost (est.)',
     sessions: 'Sessions',
     byProvider: 'By API Provider',
     recent: 'Recent Sessions',
+    totalsTitle: 'Totals',
     serverDown: 'Monitor server not running',
     serverHint: 'Start: python stats_server.py (port 9543)',
     noData: 'No data',
@@ -82,6 +92,11 @@ const STR = {
     provider: 'provider',
     model: 'model',
     est: 'est.',
+    sessionTokens: 'Session Tokens',
+    sessionCost: 'Session Cost',
+    contextUsed: 'Context Used',
+    notStarted: 'not started',
+    ctxTitle: 'Context Exhaustion',
   },
 }
 
@@ -138,6 +153,103 @@ function StatCard({ label, value, sub, tone }) {
       sub
         ? jsx('div', { className: 'text-[0.625rem] text-(--ui-text-quaternary)', children: sub })
         : null
+    ]
+  })
+}
+
+/** Context-exhaustion card with a progress bar. */
+function ContextCard({ t, used, max, pct }) {
+  const has = used != null && max != null && max > 0
+  const p = has ? Math.max(0, Math.min(100, pct != null ? pct : (used / max) * 100)) : 0
+  const hot = p >= 85
+  return jsxs('div', {
+    className:
+      'flex flex-col gap-1.5 rounded-md border border-(--ui-stroke-secondary) px-2.5 py-2',
+    children: [
+      jsxs('div', {
+        className: 'flex items-baseline justify-between',
+        children: [
+          jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: t.contextUsed }),
+          jsx('div', {
+            className: cn(
+              'text-sm font-semibold leading-tight',
+              hot ? 'text-(--ui-accent)' : 'text-foreground'
+            ),
+            children: has ? fmtPct(p) : t.notStarted
+          })
+        ]
+      }),
+      jsx('div', {
+        className: 'h-1.5 w-full overflow-hidden rounded-full bg-(--ui-stroke-secondary)',
+        children: jsx('div', {
+          className: cn('h-full rounded-full transition-all', hot ? 'bg-(--ui-accent)' : 'bg-(--ui-accent)/70'),
+          style: { width: has ? p + '%' : '0%' }
+        })
+      }),
+      jsx('div', {
+        className: 'text-[0.625rem] text-(--ui-text-quaternary)',
+        children: has
+          ? fmtTokens(used) + ' / ' + fmtTokens(max)
+          : (t.ctxTitle + ' —')
+      })
+    ]
+  })
+}
+
+/** Top block: the CURRENT session's live usage. */
+function CurrentSession({ current, liveRow, t, currency, rate }) {
+  const u = current || {}
+  const model = (u.model || (liveRow && liveRow.model) || t.unknown).split('/').pop()
+  const input = u.input != null ? u.input : (liveRow && liveRow.input_tokens)
+  const output = u.output != null ? u.output : (liveRow && liveRow.output_tokens)
+  const cachePct = liveRow && liveRow.cache_hit_pct != null ? liveRow.cache_hit_pct : null
+  const cost = liveRow && liveRow.estimated_cost != null ? liveRow.estimated_cost : null
+  const calls = u.calls != null ? u.calls : (liveRow && liveRow.api_calls)
+
+  return jsxs('div', {
+    className: 'flex flex-col gap-1.5',
+    children: [
+      jsxs('div', {
+        className: 'flex items-center gap-1.5',
+        children: [
+          jsx('span', { className: 'font-medium', children: model }),
+          jsx('span', {
+            className: 'rounded bg-(--ui-accent)/15 px-1 py-px text-[0.625rem] text-(--ui-accent)',
+            children: t.active
+          }),
+          jsx('span', {
+            className: 'ml-auto text-[0.625rem] text-(--ui-text-tertiary)',
+            children: calls != null ? calls + ' ' + t.calls : ''
+          })
+        ]
+      }),
+      jsxs('div', {
+        className: 'grid grid-cols-2 gap-1.5',
+        children: [
+          jsx(StatCard, {
+            label: t.sessionTokens,
+            value: fmtTokens((input || 0) + (output || 0)),
+            sub: t.subInput + ' ' + fmtTokens(input || 0) + ' / ' + t.subOutput + ' ' + fmtTokens(output || 0)
+          }),
+          jsx(StatCard, {
+            label: t.cacheHit,
+            value: cachePct != null ? fmtPct(cachePct) : '—',
+            sub: t.cacheRead + (liveRow ? ' ' + fmtTokens(liveRow.cache_read_tokens) : ''),
+            tone: 'accent'
+          }),
+          jsx(StatCard, {
+            label: t.sessionCost,
+            value: cost != null ? fmtMoney(cost, currency, rate) : '—',
+            sub: t.est
+          }),
+          jsx(ContextCard, {
+            t,
+            used: u.context_used,
+            max: u.context_max,
+            pct: u.context_percent
+          })
+        ]
+      })
     ]
   })
 }
@@ -243,10 +355,12 @@ function LiveSessions({ sessions, t, currency, rate }) {
 /* ------------------------------------------------------------------ */
 
 function UsagePane() {
+  const activeSessionId = useValue(host.state.activeSessionId)
   const [lang, setLang] = useState('en')
   const [days, setDays] = useState(30)
   const [stats, setStats] = useState(null)
   const [live, setLive] = useState(null)
+  const [current, setCurrent] = useState(null)
   const [err, setErr] = useState(null)
   const [usdCny, setUsdCny] = useState(7.2)
   const [currency, setCurrency] = useState(null) // null = follow language
@@ -293,14 +407,33 @@ function UsagePane() {
     }
   }, [days])
 
+  /* Live current-session usage via gateway RPC */
+  const loadCurrent = useCallback(async () => {
+    if (!activeSessionId) return
+    try {
+      const r = await host.request('session.usage', { session_id: activeSessionId })
+      const u = r && r.result ? r.result : r
+      if (u && typeof u === 'object' && !u.error) setCurrent(u)
+    } catch (e) {
+      /* gateway may not expose session.usage on older backends — ignore */
+    }
+  }, [activeSessionId])
+
   useEffect(() => {
     load()
-    const timer = setInterval(load, POLL_MS)
+    loadCurrent()
+    const timer = setInterval(() => {
+      load()
+      loadCurrent()
+    }, POLL_MS)
     return () => clearInterval(timer)
-  }, [load])
+  }, [load, loadCurrent])
 
   const tot = (stats && stats.totals) || null
   const providers = (stats && stats.by_provider) || []
+  const liveSessions = (live && live.sessions) || []
+  const currentRow =
+    liveSessions.find((s) => s.id === activeSessionId) || liveSessions[0] || null
 
   const segBtn = (n) =>
     jsx(
@@ -337,6 +470,12 @@ function UsagePane() {
       'cur' + c
     )
 
+  const sectionTitle = (text) =>
+    jsx('div', {
+      className: 'text-[0.6875rem] font-medium text-(--ui-text-secondary)',
+      children: text
+    })
+
   return jsxs('div', {
     className: 'flex h-full flex-col gap-2.5 overflow-y-auto p-3 text-sm',
     children: [
@@ -344,18 +483,7 @@ function UsagePane() {
       jsxs('div', {
         className: 'flex items-center justify-between gap-1',
         children: [
-          jsx('div', {
-            className: 'flex items-baseline gap-1.5',
-            children: [
-              jsx('span', { className: 'font-medium', children: t.paneTitle }),
-              live && live.sessions && live.sessions[0]
-                ? jsx('span', {
-                    className: 'text-[0.625rem] text-(--ui-text-tertiary)',
-                    children: t.active + ': ' + (live.sessions[0].model || t.unknown).split('/').pop()
-                  })
-                : null
-            ]
-          }),
+          jsx('div', { className: 'font-medium', children: t.paneTitle }),
           jsxs('div', {
             className: 'flex items-center gap-1',
             children: [
@@ -384,7 +512,26 @@ function UsagePane() {
           })
         : null,
 
-      /* summary cards */
+      /* ── CURRENT SESSION (first thing you see) ── */
+      sectionTitle(t.currentTitle),
+      jsx(CurrentSession, {
+        current,
+        liveRow: currentRow,
+        t,
+        currency: effCurrency,
+        rate: usdCny
+      }),
+
+      /* ── per-provider ── */
+      sectionTitle(t.byProvider + ' (' + days + (lang === 'zh' ? '天' : 'd') + ')'),
+      jsx(ProviderTable, { providers, t, currency: effCurrency, rate: usdCny }),
+
+      /* ── recent sessions ── */
+      sectionTitle(t.recent),
+      jsx(LiveSessions, { sessions: liveSessions, t, currency: effCurrency, rate: usdCny }),
+
+      /* ── TOTALS at the bottom (content unchanged) ── */
+      sectionTitle(t.totalsTitle),
       tot
         ? jsxs('div', {
             className: 'grid grid-cols-2 gap-1.5',
@@ -412,21 +559,7 @@ function UsagePane() {
               })
             ]
           })
-        : null,
-
-      /* per-provider */
-      jsx('div', {
-        className: 'text-[0.6875rem] font-medium text-(--ui-text-secondary)',
-        children: t.byProvider + ' (' + days + (lang === 'zh' ? '天' : 'd') + ')'
-      }),
-      jsx(ProviderTable, { providers, t, currency: effCurrency, rate: usdCny }),
-
-      /* recent sessions */
-      jsx('div', {
-        className: 'mt-1 text-[0.6875rem] font-medium text-(--ui-text-secondary)',
-        children: t.recent
-      }),
-      jsx(LiveSessions, { sessions: live && live.sessions, t, currency: effCurrency, rate: usdCny })
+        : null
     ]
   })
 }
