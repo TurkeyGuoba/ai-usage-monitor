@@ -399,10 +399,25 @@ def collect_stats(days, hermes_home):
     totals = totals_map.get("total", {})
     totals["cache_hit_pct"] = cache_hit_pct(totals.get("cache_read_tokens", 0), totals.get("input_tokens", 0))
 
+    def _has_usage(row):
+        """Drop noise rows (empty sessions, NULL providers) that never made a call."""
+        return (
+            (row.get("api_calls") or 0) > 0
+            or (row.get("input_tokens") or 0) > 0
+            or (row.get("output_tokens") or 0) > 0
+            or (row.get("cache_read_tokens") or 0) > 0
+        )
+
     daily = sorted(finalize(daily_map, "day"), key=lambda d: d["day"])
     by_model = sorted(finalize(by_model_map, "model"), key=lambda m: m["estimated_cost"], reverse=True)
     by_provider = sorted(finalize(by_provider_map, "provider"), key=lambda p: p["estimated_cost"], reverse=True)
     by_agent = sorted(finalize(by_agent_map, "agent"), key=lambda a: a["estimated_cost"], reverse=True)
+
+    # Hide providers/models/agents with zero usage (e.g. billing_provider NULL
+    # on an empty session surfaced as "unknown").
+    by_model = [m for m in by_model if _has_usage(m)]
+    by_provider = [p for p in by_provider if _has_usage(p)]
+    by_agent = [a for a in by_agent if _has_usage(a)]
 
     return {
         "ok": True,
@@ -435,6 +450,8 @@ def collect_live(hermes_home, limit=8):
                        started_at, COALESCE(last_activity_at, started_at) AS last_activity_at
                 FROM sessions
                 WHERE started_at IS NOT NULL
+                  AND (COALESCE(input_tokens,0) + COALESCE(output_tokens,0)
+                       + COALESCE(cache_read_tokens,0) + COALESCE(api_call_count,0)) > 0
                 ORDER BY COALESCE(last_activity_at, started_at) DESC
                 LIMIT ?
                 """,
